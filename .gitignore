@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+
+# Logs
+logs/
+*.log
+
+# Downloads and outputs (large files)
+downloads/
+output/
+clips/
+*.mp4
+*.webm
+*.mkv
+*.avi
+
+# Temporary files
+*.tmp
+*TEMP*
+*.temp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# UV lock file (optional - can be included for reproducibility)
+# uv.lock
+
+# Test files (keep only essential ones)
+src/debug_*.py
+src/inspect_*.py
+src/test_*.py
+src/verify_*.py
