@@ -45,11 +45,28 @@ with st.sidebar:
             if response.status_code == 200:
                 ollama_models = [m["name"] for m in response.json().get("models", [])]
                 if ollama_models:
-                    # Find default index
-                    default_idx = 0
-                    if default_models["ollama"] in ollama_models:
-                        default_idx = ollama_models.index(default_models["ollama"])
-                    model_name = st.selectbox("Select Ollama Model", ollama_models, index=default_idx)
+                    # Use selectbox with key - Streamlit manages state automatically
+                    # Initialize default in session state if needed
+                    if "selected_ollama_model" not in st.session_state:
+                        if default_models["ollama"] in ollama_models:
+                            st.session_state.selected_ollama_model = default_models["ollama"]
+                        else:
+                            st.session_state.selected_ollama_model = ollama_models[0]
+                    
+                    # Get default index for initial render
+                    try:
+                        default_idx = ollama_models.index(st.session_state.selected_ollama_model)
+                    except ValueError:
+                        default_idx = 0
+                    
+                    # Simple selectbox - let Streamlit handle state via return value
+                    model_name = st.selectbox(
+                        "Select Ollama Model", 
+                        options=ollama_models, 
+                        index=default_idx
+                    )
+                    # Store selection for next run
+                    st.session_state.selected_ollama_model = model_name
                 else:
                     st.warning("No models found. Run `ollama pull <model>` first.")
                     model_name = st.text_input("Model Name", value=default_models["ollama"])
@@ -115,29 +132,65 @@ with col1:
                 # Let's hope the agent returns the clean path.
                 
                 # Clean up result string if needed (remove quotes, etc)
-                video_path = str(result).strip().strip("'").strip('"')
+                result_str = str(result).strip().strip("'").strip('"')
                 
-                if os.path.exists(video_path):
-                    st.session_state['video_path'] = video_path
-                else:
-                    st.error(f"Video file not found at: {video_path}")
-                    # Try to find the latest clip in output/ as fallback
+                # Try to parse as JSON array for multiple clips
+                video_paths = []
+                try:
+                    import json
+                    parsed = json.loads(result_str)
+                    if isinstance(parsed, list):
+                        video_paths = [p for p in parsed if os.path.exists(p)]
+                except:
+                    # Not JSON, try as single path
+                    if os.path.exists(result_str):
+                        video_paths = [result_str]
+                
+                # Fallback: scan output folder for recent clips
+                if not video_paths:
                     try:
                         list_of_files = os.listdir('output')
                         full_paths = [os.path.join('output', x) for x in list_of_files if x.endswith('.mp4')]
                         if full_paths:
-                            latest_file = max(full_paths, key=os.path.getctime)
-                            st.warning(f"Using latest created file: {latest_file}")
-                            st.session_state['video_path'] = latest_file
-                    except:
-                        pass
+                            # Sort by creation time, newest first
+                            full_paths.sort(key=os.path.getctime, reverse=True)
+                            # Take clips created in the last 10 minutes
+                            import time
+                            recent_cutoff = time.time() - 600  # 10 minutes
+                            video_paths = [p for p in full_paths if os.path.getctime(p) > recent_cutoff]
+                            if video_paths:
+                                st.warning(f"Found {len(video_paths)} recent clips in output folder")
+                    except Exception as e:
+                        st.error(f"Error scanning output folder: {e}")
+                
+                if video_paths:
+                    st.session_state['video_paths'] = video_paths
+                else:
+                    st.error(f"No video files found. Result was: {result_str[:200]}")
                         
             except Exception as e:
                 st.error(f"Error occurred: {str(e)}")
 
 with col2:
-    st.subheader("Result")
-    if 'video_path' in st.session_state:
+    st.subheader("Results")
+    if 'video_paths' in st.session_state and st.session_state['video_paths']:
+        video_paths = st.session_state['video_paths']
+        st.success(f"🎬 Generated {len(video_paths)} viral clip(s)!")
+        
+        for i, video_path in enumerate(video_paths, 1):
+            with st.expander(f"Clip {i}: {os.path.basename(video_path)}", expanded=(i == 1)):
+                st.video(video_path)
+                
+                with open(video_path, "rb") as file:
+                    st.download_button(
+                        label=f"⬇️ Download Clip {i}",
+                        data=file,
+                        file_name=os.path.basename(video_path),
+                        mime="video/mp4",
+                        key=f"download_{i}"
+                    )
+    elif 'video_path' in st.session_state:
+        # Legacy single video support
         video_path = st.session_state['video_path']
         st.video(video_path)
         st.caption(f"Playing: {os.path.basename(video_path)}")
@@ -150,8 +203,9 @@ with col2:
                 mime="video/mp4"
             )
     else:
-        st.info("Run the factory to see the result here.")
+        st.info("Run the factory to see the results here.")
 
 # Footer
 st.markdown("---")
 st.markdown("Powered by CrewAI, MoviePy, & Streamlit")
+

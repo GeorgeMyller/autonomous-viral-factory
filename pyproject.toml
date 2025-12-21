@@ -1,7 +1,7 @@
 [project]
 name = "autonomous-viral-factory"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI-powered system that automatically creates viral video clips from YouTube trends using CrewAI agents"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

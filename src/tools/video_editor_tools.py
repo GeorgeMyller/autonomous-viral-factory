@@ -76,15 +76,40 @@ class SmartVideoClipperTool(BaseTool):
             os.makedirs(output_dir, exist_ok=True)
             output_path = f"{output_dir}/clip_{int(time.time())}.mp4"
             
-            # Helper to convert MM:SS to seconds
+            # Helper to convert various time formats to seconds
             def parse_time(t):
-                if isinstance(t, str) and ":" in t:
+                """Parse time in multiple formats: MM:SS, MM:SS.ms, or raw seconds (float/int)"""
+                if isinstance(t, (int, float)):
+                    return float(t)
+                
+                if isinstance(t, str):
+                    t = t.strip()
+                    
+                    # Handle MM:SS or MM:SS.ms format
+                    if ":" in t:
+                        parts = t.split(':')
+                        try:
+                            if len(parts) == 2:
+                                minutes = int(parts[0])
+                                # Handle seconds with optional decimal (e.g., "12.3" or "12")
+                                seconds = float(parts[1])
+                                return minutes * 60 + seconds
+                            elif len(parts) == 3:
+                                # HH:MM:SS format
+                                hours = int(parts[0])
+                                minutes = int(parts[1])
+                                seconds = float(parts[2])
+                                return hours * 3600 + minutes * 60 + seconds
+                        except ValueError:
+                            pass
+                    
+                    # Try parsing as direct float (e.g., "12.3")
                     try:
-                        m, s = map(int, t.split(':'))
-                        return m * 60 + s
+                        return float(t)
                     except ValueError:
-                         # Fallback if there are milliseconds or other formats
-                         pass
+                        pass
+                
+                # Fallback: try converting directly
                 return float(t)
 
             with VideoFileClip(file_path) as video:
@@ -103,16 +128,120 @@ class SubtitlerTool(BaseTool):
     name: str = "Auto Subtitler"
     description: str = (
         "Useful for adding dynamic captions to a video clip. "
+        "Uses Whisper for transcription and burns subtitles into the video. "
         "Input should be the file path of the video clip."
     )
     args_schema: type[BaseModel] = SubtitlerSchema
 
     def _run(self, file_path: str) -> str:
-        print(f"DEBUG: Adding placeholder subtitles for {file_path}...")
-        # For this phase, we won't run full Whisper as it's heavy.
-        # We will return the path indicating subtitles 'processed'.
-        # Real implementation would use whisper to generate SRT then burn it.
+        print(f"DEBUG: Adding real subtitles to {file_path}...")
         
-        # Simulating processing
-        return file_path 
+        if not os.path.exists(file_path):
+            return f"Error: Video file not found at {file_path}"
         
+        try:
+            # Step 1: Check if SRT already exists (from ViralMomentAnalyzer)
+            from pathlib import Path
+            srt_path = Path(file_path).with_suffix('.srt')
+            
+            if not srt_path.exists():
+                # Generate SRT with Whisper
+                print("DEBUG: No SRT found, generating with Whisper...")
+                srt_path = self._generate_srt(file_path)
+            else:
+                print(f"DEBUG: Using existing SRT: {srt_path}")
+            
+            # Step 2: Burn subtitles into video with ffmpeg
+            output_path = self._burn_subtitles(file_path, str(srt_path))
+            
+            return output_path
+            
+        except Exception as e:
+            print(f"ERROR: Subtitle processing failed: {str(e)}")
+            # Return original file if subtitling fails
+            return file_path
+    
+    def _generate_srt(self, video_path: str) -> str:
+        """Generate SRT file using Whisper."""
+        import whisper
+        from pathlib import Path
+        
+        print("DEBUG: Loading Whisper model (base)...")
+        model = whisper.load_model("base")
+        
+        print("DEBUG: Transcribing for subtitles...")
+        result = model.transcribe(video_path, verbose=False)
+        
+        srt_path = Path(video_path).with_suffix('.srt')
+        
+        with open(srt_path, 'w', encoding='utf-8') as f:
+            for i, segment in enumerate(result.get("segments", []), 1):
+                start = self._seconds_to_srt_time(segment["start"])
+                end = self._seconds_to_srt_time(segment["end"])
+                text = segment["text"].strip()
+                f.write(f"{i}\n{start} --> {end}\n{text}\n\n")
+        
+        print(f"DEBUG: SRT generated at {srt_path}")
+        return str(srt_path)
+    
+    def _seconds_to_srt_time(self, seconds: float) -> str:
+        """Convert seconds to SRT timestamp format."""
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        millis = int((seconds - int(seconds)) * 1000)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+    
+    def _burn_subtitles(self, video_path: str, srt_path: str) -> str:
+        """Burn subtitles into video using ffmpeg."""
+        import subprocess
+        from pathlib import Path
+        
+        output_dir = "output"
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Create output filename
+        base_name = Path(video_path).stem
+        output_path = os.path.join(output_dir, f"{base_name}_subtitled_{int(time.time())}.mp4")
+        
+        # Escape the SRT path for ffmpeg filter
+        escaped_srt = srt_path.replace(":", r"\:").replace("'", r"\'")
+        
+        # ffmpeg command to burn subtitles
+        # Using force_style for better visibility (white text with black outline)
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-vf", f"subtitles='{escaped_srt}':force_style='FontSize=24,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,BorderStyle=3,Outline=2'",
+            "-c:a", "copy",
+            output_path
+        ]
+        
+        print(f"DEBUG: Running ffmpeg to burn subtitles...")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode != 0:
+                print(f"WARNING: ffmpeg failed: {result.stderr[:500]}")
+                # Try simpler command without styling
+                cmd_simple = [
+                    "ffmpeg", "-y",
+                    "-i", video_path,
+                    "-vf", f"subtitles='{escaped_srt}'",
+                    "-c:a", "copy",
+                    output_path
+                ]
+                result = subprocess.run(cmd_simple, capture_output=True, text=True, timeout=300)
+                if result.returncode != 0:
+                    print(f"ERROR: Simple ffmpeg also failed, returning original")
+                    return video_path
+            
+            print(f"DEBUG: Subtitled video saved to {output_path}")
+            return output_path
+            
+        except subprocess.TimeoutExpired:
+            print("ERROR: ffmpeg timed out")
+            return video_path
+        except FileNotFoundError:
+            print("ERROR: ffmpeg not found. Please install ffmpeg.")
+            return video_path
+
