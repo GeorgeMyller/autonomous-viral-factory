@@ -35,7 +35,7 @@
 
 ```bash
 # Clone o repositório
-git clone https://github.com/seu-usuario/autonomous-viral-factory.git
+git clone https://github.com/GeorgeMyller/autonomous-viral-factory.git
 cd autonomous-viral-factory
 
 # Instale as dependências com uv
@@ -183,7 +183,7 @@ Para usuários do Ollama, certifique-se de usar um modelo capaz como `qwen3:14b`
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/autonomous-viral-factory.git
+git clone https://github.com/GeorgeMyller/autonomous-viral-factory.git
 cd autonomous-viral-factory
 
 # Install dependencies with uv
